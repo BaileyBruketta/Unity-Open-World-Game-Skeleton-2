@@ -1,25 +1,92 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using UnityEngine.Rendering.PostProcessing;
 
 public class GameScriptX : MonoBehaviour
 {
+    //to implement:
+    //Some of these public items should really be private, and allocating by findgameobject at start of runtime 
+    //enemy and animal movement algorithm that forces animals apart & away from player SLIGHTLY when player is moving 
+    //items and bodies  "thud" when hit ground
+    //bodyweight 
+
+    
+    private float temperature;
+
+    public AudioSource PickUpItemSound;
+
+    public GameObject[] CraftableItems;
+    public string[] CraftableItemNames;
+    //0=fire
+
+    //MenuScreen Components
+    public GameObject MenuScreen;
+    public GameObject[] MenuComponents;
+    //0=command menu 
+    //1=inventory
+    public InputField MenuInput;    
+    public bool MenuUp;
+
+    //inventory
+    public GameObject Inventory;
+    private int[] InventoryAmounts; 
+    public Text[] InventoryComponents;
+    public string[] InventoryNames;
+    public float[] CarryWeightPerItem;
+    //0 = sticks
+    public Text[] HudComponents;
+    //1=carry weight
+    //2=health
+    //3=hunger
+    //4=heat
+    //5=fatigue
+
+
+
+    private float MaxCarryWeight;
+    private float carryingweight;
+    private float heat;
+    private float maxheat;
+    private float maxhealth;
+    private float fatigue;
+    private float maxfatigue;
+    private float hunger;
+    private float maxhunger;
+
+
+    //for grabbing objects
+    public GameObject ItemGrabObject;
+    Animator ItemGrabber;
+    
+        //resource floats
+    private float[] BranchesOnTrees; //number of branches on a given tree
+    private int[] TreeBranchMax; //maximum number of branches to be yielded from scavenging a tree
+
+    private GameObject[] waterlist;
+    private Vector3[] waterlocationlist;
+
+
+ //dealing with guns   + a few out of place things
     public Animator gunanimator;
-    private bool[] Chasing;
-    public GameObject hitmarker;
+    private bool[] Chasing;  //is item chasing ? for enemyupdate function
+    public GameObject hitmarker; 
     public GameObject scope;
-    public Camera BigCam;
+    public Camera BigCam; //main camera. 
+
+    //for doing math at start of game / populating world 
     public int numberoftrees;
     public int numberofdroids;
     public int numberofScreechers;
     public int NumberofResources;
     public int totalnumberofitems;
-    public GameObject[] deaddroid;
+    public GameObject[] deaddroid; //list of dead enemy instances to pull bodies from when enemies die. 
     public PhysicMaterial physics;
+
     //weapons. each weapon has a location relative to the ui, a location for muzzle smoke and flashes, and a location for casings to come from. their [#]s should match.
     public List<int> inventory;
-    public float[] gunscalex, gunscaley, gunscalez;
+    public float[] gunscalex, gunscaley, gunscalez; //how big is the mesh of the gun you switch to going to be 
     public int[] Weapons; //weaponslist
     public Vector3[] Barrels; //barrel locations
     public Vector3[] Chambers;   //where bullet casings come from
@@ -43,7 +110,7 @@ public class GameScriptX : MonoBehaviour
     public float[] weapondamage;
     public float enemyupdatetimer;
 
-
+    //list of item prefabs to pull from when populating, etc.
     public Camera cam;
     public GameObject baseobjectprefab;
     public GameObject[] trees;
@@ -51,8 +118,8 @@ public class GameScriptX : MonoBehaviour
     public GameObject[] Resources;
     public GameObject[] DeadResources;
     public int[] ResourceType;
-    //the following values constitute a list of items and their locations and bodies. 
-    
+
+    //the following values constitute a list of items and their locations and bodies.     
     private Vector3[] EntityLocations;
     private Transform[] EntityLocales;
     private GameObject[] items;
@@ -60,6 +127,8 @@ public class GameScriptX : MonoBehaviour
     private float[] DistanceToPlayer;
     private Rigidbody[] Rigidbodies;
     private float[] preliminarytimers;
+    
+
     //the following values hold which types of items exist
     private int[] EntityClass;
     //0=player;
@@ -70,7 +139,8 @@ public class GameScriptX : MonoBehaviour
     private int[] EnemyType;
     
     //these all deal with character movements
-    public float speed;
+    private float speed;
+    public float initialspeed;
     public float maxvelocity;
     public float mouseSensitivity = 25.0F;
     public float clampAngle = 80.0F;
@@ -79,6 +149,7 @@ public class GameScriptX : MonoBehaviour
     public float characterheight;
     public float charactergirth;
 
+    //important floats - make threshold private before final build for #speed
     public float distancethreshold;
     private float timer;
     private float updatetimer;
@@ -87,6 +158,17 @@ public class GameScriptX : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        temperature = 45;
+        carryingweight = 0;
+        MaxCarryWeight = 20;
+        speed=initialspeed;
+
+        var se = new InputField.SubmitEvent();
+        se.AddListener(ConsoleCommands);
+        MenuInput.onEndEdit = se;
+        MenuUp = false;
+
+    ItemGrabber = ItemGrabObject.GetComponent<Animator>();
         StartTerrainGeneration();
         gunanimator = gunanimator.GetComponent<Animator>();
         //map details
@@ -102,10 +184,17 @@ public class GameScriptX : MonoBehaviour
         Defense = new float[totalnumberofitems];
         EnemyType = new int[totalnumberofitems];
         Chasing = new bool[totalnumberofitems];
-        //deaddroid = new GameObject[totalnumberofitems];
+        BranchesOnTrees = new float[totalnumberofitems];
+        TreeBranchMax = new int[totalnumberofitems];
+        
+        InventoryAmounts = new int[1]; //number of inventory slots
 
-        //player locations
-        EntityLocations[0] = new Vector3(500, 0, 500);
+        
+    
+    //deaddroid = new GameObject[totalnumberofitems];
+
+    //player locations
+    EntityLocations[0] = new Vector3(500, 0, 500);
         //EntityLocales[0].position = new Vector3(500,0,500);
         //gunsway
         weapondamage[0] = 30;
@@ -156,13 +245,160 @@ public class GameScriptX : MonoBehaviour
         ResourceSpawn();
 
         enemyspawn();
-        
+        InitiateHud();
         GameEntry();
         updatetimer = 25;
 
     }
+    //implement gradual carry weight increase (eat + sleep ->muscle mass increase) AND decrease 
+    //implement weapon type areas where only certain types of weapons WORK
+    private void ConsoleCommands(string arg0) 
+    {
+        Debug.Log("checking console commands");
+        if (arg0=="/inventory")
+        {
+            for (int i = 0; i < InventoryAmounts.Length; i++)
+            {
+                InventoryComponents[i].text = InventoryNames[i] + " : " + InventoryAmounts[i] + " , " + "Carry Weight : " + CarryWeightPerItem[i] + "kg" + " (" + (CarryWeightPerItem[i] * InventoryAmounts[i]) + "kg" + ")";
+            }
+            
+            MenuComponents[0].SetActive(false); //deactivate command list
+            MenuComponents[1].SetActive(true); //activate inventory list 
+            
+        }
+        if (arg0 =="/throw")
+        {
+
+        }
+        if(arg0=="/list craftable")
+        {
+
+        }
+        for (int cf = 0; cf < CraftableItemNames.Length; cf++) //crafting
+        {
+            Debug.Log("checking craftables");
+            if (arg0 == "/craft " + (CraftableItemNames[cf]))
+            {
+                Debug.Log("we have a match");
+                RaycastHit hit;
+                if (Physics.Raycast(cam.transform.position, cam.transform.forward, out hit, 15))
+                {
+                    Debug.Log("raycasted");
+                    if (CraftableItemNames[cf] == "fire") //makes fire
+                    {
+                        Debug.Log("its a fire");
+                        if (InventoryAmounts[0] > 3) //more than three sticks?
+                        {
+                            Debug.Log("spacious");
+                            GameObject craftable = Instantiate(CraftableItems[cf]);
+                            craftable.transform.position = new Vector3(hit.point.x,hit.point.y+1,hit.point.z);
+                            InventoryAmounts[0] -= 3;
+                        }
+                    }
+                }
+
+            }
+            CalculateCarryWeight();
+            for (int i = 0; i < InventoryAmounts.Length; i++)
+            {
+                InventoryComponents[i].text = InventoryNames[i] + " : " + InventoryAmounts[i] + " , " + "Carry Weight : " + CarryWeightPerItem[i] + "kg" + " (" + (CarryWeightPerItem[i] * InventoryAmounts[i]) + "kg" + ")";
+            }
+        }
+        if (arg0 == "/equipment")
+        {
+
+        }
+        if (arg0 == "/equip")
+        {
+
+        }
+        if (arg0 == "/savegame")
+        {
+
+        }
+        if (arg0 == "/loadgame")
+        {
+
+        }
+        if (arg0 == "/skills")
+        {
+
+        }
+        if (arg0 == "/quests")
+        {
+
+        }
+        if (arg0 == "/commands")
+        {
+            MenuComponents[0].SetActive(true); //activate command list
+            MenuComponents[1].SetActive(false); //deactivate inventory list 
+        }
+
+
+    }
+    private void InitiateHud()
+    {
+        CalculateCarryWeight();
+        HudComponents[0].text = "Carry Weight : " + carryingweight +"/"+MaxCarryWeight+ "kg"; //edit carry weight
+    }
+    private void UpdateHud()
+    {
+        if (hunger > .1f)
+        {
+            hunger -= .025f;
+        }
+        if (temperature < 32)
+        {
+            heat -= .025f;
+        }
+        if (fatigue > .1f)
+        {
+            fatigue -= .00003f;
+        }
+        
+
+        var healthquotient = .001f * (hunger / maxhunger) * (heat / maxheat) * (fatigue / maxfatigue);
+
+        if (Health[0] < maxhealth)
+        {
+            Health[0] += healthquotient;
+        }
+
+        if (hunger < 1)
+        {
+            Health[0] -= .1f;
+        }
+        if (fatigue < 1)
+        {
+            Health[0] -= .1f;
+        }
+        if (heat < 96)
+        {
+            Health[0] -= .01f * (maxheat - heat);
+        }
+
+
+        //0=carry weight
+        //1=health
+        //2=hunger
+        //3=heat
+        //4=fatigue
+        HudComponents[1].text = "Health: "+ Mathf.RoundToInt(Health[0]) + " / " + maxhealth;
+        HudComponents[2].text = "Hunger: "+Mathf.RoundToInt(hunger) + " / " + maxhunger +"cal";
+        HudComponents[3].text = "Heat: "+Mathf.RoundToInt(heat) + " / " + maxheat + "F";
+        HudComponents[4].text = "Fatigue: "+Mathf.RoundToInt(fatigue) + " / " + maxfatigue + "hrs";
+    }
+
     private void GameEntry()
     {
+        Health[0] = 100;
+        maxhealth = 100;
+        hunger = 2700;
+        maxhunger = 2700;
+        heat = 98;
+        maxheat = 98;
+        fatigue = 6;
+        maxfatigue = 6;
         Weaponselectednumber = 0;
         gunmeshobject.transform.localScale = new Vector3(gunscalex[inventory[Weaponselectednumber]], gunscaley[inventory[Weaponselectednumber]], gunscalez[inventory[Weaponselectednumber]]);
     }
@@ -184,6 +420,8 @@ public class GameScriptX : MonoBehaviour
             Physics.Raycast(localtree, -Trei.transform.up, out hit, 800);
             Trei.transform.position = hit.point;
             EntityLocations[i] = Trei.transform.position;
+            TreeBranchMax[i] = Random.Range(0, 6);
+            BranchesOnTrees[i] = TreeBranchMax[i];
             //if (x == 9)
             // {
             //     EntityClass[i] = 9;
@@ -219,11 +457,11 @@ public class GameScriptX : MonoBehaviour
         var scritch = goy + numberofScreechers;
         for (int i = treeanre; i < goy; i++) //droids
         {
-            Vector3 NewDroid = new Vector3((Random.Range(0, 1000)), 40, Random.Range(0, 1000));
+            Vector3 NewDroid = new Vector3((Random.Range(0, 1000)), 60, Random.Range(0, 1000));
             GameObject Droid = Instantiate(enemies[0]);
             Droid.transform.position = NewDroid;
             items[i] = Droid;
-            EntityLocations[i] = Droid.transform.position;
+            EntityLocations[i] = NewDroid;
             preliminarytimers[i] = 5;
             Defense[i] = .7f;
             Health[i] = 100;
@@ -231,10 +469,16 @@ public class GameScriptX : MonoBehaviour
             Rigidbodies[i] = Droid.GetComponent<Rigidbody>();
             EnemyType[i] = 0;
 
+            RaycastHit hit;
+            Physics.Raycast(NewDroid, -Droid.transform.up, out hit, 800);
+            Droid.transform.position = new Vector3(hit.point.x, hit.point.y + 10, hit.point.z);
+            EntityLocations[i] = Droid.transform.position;
+           
+
         }
         for (int i = goy; i < scritch; i++) //screechers
         {
-            Vector3 NewDroid = new Vector3((Random.Range(0, 1000)), 40, Random.Range(0, 1000));
+            Vector3 NewDroid = new Vector3((Random.Range(0, 1000)), 60, Random.Range(0, 1000));
             GameObject Droid = Instantiate(enemies[1]);
             Droid.transform.position = NewDroid;
             items[i] = Droid;
@@ -245,6 +489,12 @@ public class GameScriptX : MonoBehaviour
             EntityClass[i] = 3;
             Rigidbodies[i] = Droid.GetComponent<Rigidbody>();
             EnemyType[i] = 1;
+            
+
+           RaycastHit hit;
+            Physics.Raycast(NewDroid, -Droid.transform.up, out hit, 800);
+            Droid.transform.position = new Vector3(hit.point.x, hit.point.y + 10, hit.point.z);
+            EntityLocations[i] = Droid.transform.position;
 
         }
     }
@@ -252,38 +502,40 @@ public class GameScriptX : MonoBehaviour
     // Update is called once per frame  
     void Update()
     {
-        //gunsway 
-
-
-
-        //var v = Rigidbodies[0].velocity;
-        timer -= 1;
-        if (timer < 1)
-        {
-            //aaaaaaaaaaaaGameUpdate();
-        }
-
-
         //character movement
+        if (Input.GetKeyDown(KeyCode.Slash))
+        {
+            MenuInput.ActivateInputField();
+            speed = 0;
+        }
+        if (Input.GetKeyDown(KeyCode.Return))
+        {
+            speed = initialspeed;
+            MenuInput.DeactivateInputField();
+        }
         if (Input.GetKey(KeyCode.W))
         {
             Rigidbodies[0].velocity = items[0].transform.forward * speed;
+            Rigidbodies[0].velocity -= items[0].transform.up * speed/2;
             gunanimator.SetTrigger("Walk");
         }
 
         else if (Input.GetKey(KeyCode.A))
         {
             Rigidbodies[0].velocity = items[0].transform.right * -speed;
+            Rigidbodies[0].velocity -= items[0].transform.up * speed/2;
             gunanimator.SetTrigger("Walk");
         }
         else if (Input.GetKey(KeyCode.S))
         {
             Rigidbodies[0].velocity = items[0].transform.forward * -speed;
+            Rigidbodies[0].velocity -= items[0].transform.up * speed/2;
             gunanimator.SetTrigger("Walk");
         }
         else if (Input.GetKey(KeyCode.D))
         {
             Rigidbodies[0].velocity = items[0].transform.right * speed;
+            Rigidbodies[0].velocity -= items[0].transform.up * speed/2;
             gunanimator.SetTrigger("Walk");
         }
 
@@ -302,7 +554,9 @@ public class GameScriptX : MonoBehaviour
 
         if (Input.GetMouseButtonDown(0))
         {
-            gunanimator.SetTrigger("Fire");
+            //gunanimator.StopPlayback();
+            gunanimator.Play("gunfire", -1, 0f);
+           // gunanimator.SetTrigger("Fire");
             cam.transform.rotation *= Quaternion.Euler(-1f, 0, 0.0f);
             GameObject casing = Instantiate(BulletCasing, chamberOpening.transform);
             GameObject smoke = Instantiate(gunsmoke, barrelmuzzle.transform);
@@ -352,7 +606,7 @@ public class GameScriptX : MonoBehaviour
 
 
         }
-
+        
         if (Input.GetMouseButtonDown(1))
         {
             if (Weaponselectednumber == 0)
@@ -401,24 +655,57 @@ public class GameScriptX : MonoBehaviour
             }
         }
 
-        if (Input.GetKeyDown(KeyCode.E))
+        if (Input.GetKeyDown(KeyCode.E)) //fucking grabbing things
         {
             //inventory.Add(1);
             for (int i = 1; i<totalnumberofitems; i++)
             {
                 DistanceToPlayer[i] = Vector3.Distance(EntityLocations[i], EntityLocations[0]);
-                if (EntityClass[i] == 2) //is a renewable or thing you can pick up 
+                if (DistanceToPlayer[i] < 6)
                 {
-                    GameObject geeked = Instantiate(DeadResources[ResourceType[i]]);
-                    geeked.transform.position = items[i].transform.position;
-                    geeked.transform.rotation = items[i].transform.rotation;
-                    items[i].transform.position = new Vector3(Random.Range(0, 1000), 0, Random.Range(0, 1000));
-                    
+                    if (carryingweight < MaxCarryWeight)
+                    {
+                        if (EntityClass[i] == 2) //is a renewable or thing you can pick up 
+                        {                 //this should obviously be redone vvvvvvvvvvvvvv / should allow for bush growth and those components should allow for farming
+                            GameObject geeked = Instantiate(DeadResources[ResourceType[i]]); //makes a copy of the plant where there are no berries
+                            geeked.transform.position = items[i].transform.position; //moves it to the plants initial location
+                            geeked.transform.rotation = items[i].transform.rotation; //and location
+                            items[i].transform.position = new Vector3(Random.Range(0, 1000), 0, Random.Range(0, 1000)); //moves the original plant to somewhere else on the map
+
+                        }
+                        if (EntityClass[i] == 1)
+                        {
+
+                            if (BranchesOnTrees[i] >= 1)
+                            {
+                                ItemGrabber.Play("GrabStick"); //plays the grab branch animation from the object 
+                                InventoryAmounts[0] += 1;
+                                BranchesOnTrees[i] -= 1;
+                                PickUpItemSound.Play();
+                            }
+
+                        }
+                    }
+                    CalculateCarryWeight();
+                    HudComponents[0].text = "Carry Weight : " + carryingweight+ "/" + MaxCarryWeight + "kg"; //edit carry weight
                 }
 
 
             }
             
+        }
+
+        if (Input.GetKeyDown(KeyCode.Tab))
+        {
+            if (MenuUp == false)
+            {
+                MenuScreen.SetActive(true);
+            }
+            else if (MenuUp == true)
+            {
+                MenuScreen.SetActive(false);
+            }
+            CallMenu();
         }
 
 
@@ -431,13 +718,39 @@ public class GameScriptX : MonoBehaviour
         {
             EnemyUpdate();
         }
-        updatetimer -= 1;
+        updatetimer -= .2f;
         if (updatetimer < 2)
         {
             GameUpdate();
+            UpdateHud();
         }
     }
-
+    private void CalculateCarryWeight()
+    {
+        carryingweight=(InventoryAmounts[0] * CarryWeightPerItem[0]);
+        HudComponents[0].text = "Carry Weight : " + carryingweight + "/" + MaxCarryWeight + "kg";
+    }
+    private void CallMenu()
+    {
+        if (MenuUp == false)
+        {
+            MenuUp = true;
+        }
+        else if (MenuUp == true)
+        {
+            MenuUp = false;
+        }
+    }
+    private void ResourceUpdate()
+    {
+        for (int i= 1; i < numberoftrees; i++)
+        {
+            if (BranchesOnTrees[i] < TreeBranchMax[i])
+            {
+                BranchesOnTrees[i] += .001f;
+            }
+        }
+    }
     private void GameUpdate()
     {
         var grish = numberoftrees + NumberofResources ;
@@ -455,8 +768,14 @@ public class GameScriptX : MonoBehaviour
                 items[i].SetActive(false);
             }
         }
+
+        RaycastHit hit;
+
+        
+
         updatetimer = 5;
     }
+    
     private void EnemyUpdate()
     {
         var fuck = NumberofResources + numberoftrees;
@@ -520,18 +839,19 @@ public class GameScriptX : MonoBehaviour
             }
             if (Chasing[i] == true)
             {
-                if (DistanceToPlayer[i] > 3)
+                if (DistanceToPlayer[i] > 7)
                 {
                     items[i].transform.position += items[i].transform.forward * 40f * Time.deltaTime;
                     EntityLocations[i] = items[i].transform.position;
                 }
-                if (DistanceToPlayer[i] < 4)
+                if (DistanceToPlayer[i] < 10)
                 {
 
-                    preliminarytimers[i] -= 1;
+                    preliminarytimers[i] -= 1f;
                     if (preliminarytimers[i] < 2)
                     {
-                        Health[0] -= 2;
+                        
+                        Health[0] -= 1f;
                         preliminarytimers[i] = 5;
                     }
                 }
@@ -551,7 +871,7 @@ public class GameScriptX : MonoBehaviour
 
 
     /// <summary>
-    /// perlin generation shit for terrain data very slow
+    /// perlin generation shit for terrain data very slow / update: very effective& playing with scale allows for hills. credit to Brackey's tutorials on perlin noise and procedural terrain generation
     /// </summary>
     public void Kill(int x)
     {
@@ -560,11 +880,17 @@ public class GameScriptX : MonoBehaviour
             GameObject geeked = Instantiate(deaddroid[EnemyType[x]]);
             geeked.transform.position = items[x].transform.position;
             geeked.transform.rotation = items[x].transform.rotation;
-            items[x].transform.position = new Vector3(Random.Range(0, 1000), 0, Random.Range(0, 1000));
+            items[x].transform.position = new Vector3(Random.Range(0, 1000), 60, Random.Range(0, 1000));
+            EntityLocations[x] = items[x].transform.position;
             Health[x] = 100;
             Chasing[x] = false;
-           // Destroy(items[x].gameObject);
-           // items[x] = geeked;
+
+            RaycastHit hit;
+            Physics.Raycast(EntityLocations[x], -items[x].transform.up, out hit, 800);
+            items[x].transform.position = new Vector3(hit.point.x, hit.point.y + 10, hit.point.z);
+            EntityLocations[x] = items[x].transform.position;
+            // Destroy(items[x].gameObject);
+            // items[x] = geeked;
         }
     }
     private void StartTerrainGeneration()
