@@ -19,7 +19,7 @@ public class GrassMAchine : MonoBehaviour
         items = new GameObject[numberofgrass];
         for (int i =0; i<grasslocations.Length; i++)
         {
-            Vector3 localtree = new Vector3((Random.Range(0, 1000)), 60, (Random.Range(0, 1000)));
+            Vector3 localtree = new Vector3((Random.Range(0, 2000)), 60, (Random.Range(0, 2000)));
             var x = Mathf.RoundToInt(Random.Range(0, Grass.Length));
             GameObject Trei = Instantiate(Grass[x]);
             Trei.transform.localEulerAngles = new Vector3(Random.Range(0, 0), Random.Range(0, 360), Random.Range(0, 0));
@@ -28,7 +28,7 @@ public class GrassMAchine : MonoBehaviour
             grasslocations[i] = Trei.transform.position;
 
             RaycastHit hit;
-            Physics.Raycast(localtree, -Trei.transform.up, out hit, 800);
+            Physics.Raycast(localtree, -Trei.transform.up, out hit, 900);
             Trei.transform.position = hit.point;
             grasslocations[i] = Trei.transform.position;
         }
@@ -37,7 +37,7 @@ public class GrassMAchine : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        timer -= 1;
+        timer -= .1f;
         if (timer < 2)
         {
             RenderUpdate();
